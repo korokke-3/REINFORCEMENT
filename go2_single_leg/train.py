@@ -1,5 +1,5 @@
 """
-Unitree Go2 1本足ダイナミックけんけん 強化学習トレーニングスクリプト
+Unitree Go2 1本足ダイナミック爆発ジャンプ＆継続強化学習トレーニングスクリプト
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ parser.add_argument("--num_envs", type=int, default=4096, help="Number of parall
 parser.add_argument("--task", type=str, default="Isaac-Velocity-Rough-Unitree-Go2-SingleLeg-v0", help="Task name")
 parser.add_argument("--seed", type=int, default=42, help="Random seed")
 parser.add_argument("--max_iterations", type=int, default=None, help="Max RL iterations")
+parser.add_argument("--resume_path", type=str, default=None, help="Path to checkpoint model to resume from")
 
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -63,6 +64,11 @@ def main():
     print(f"[INFO] Simulating {args_cli.num_envs} Go2 robots concurrently on GPU (Single-Leg)...")
 
     runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
+    
+    if args_cli.resume_path and os.path.exists(args_cli.resume_path):
+        print(f"[INFO] Resuming training from checkpoint: {args_cli.resume_path}")
+        runner.load(args_cli.resume_path)
+
     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
 
     env.close()
