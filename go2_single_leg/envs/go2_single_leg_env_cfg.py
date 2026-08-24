@@ -1,5 +1,5 @@
 # Copyright (c) 2024-2026. All rights reserved.
-# Unitree Go2 真の一本足けんけん (Strict Single-Leg Forward Hopping) 環境設定
+# Unitree Go2 真の一本足爆発ジャンプ (True Single-Leg Explosive Jump & Flight) 環境設定
 
 from __future__ import annotations
 
@@ -37,51 +37,32 @@ from . import go2_single_leg_rewards as custom_rewards
 
 
 @configclass
-class Go2SingleLegCommandsCfg(CommandsCfg):
-    """前進けんけん速度コマンド設定"""
-    base_velocity = mdp.UniformVelocityCommandCfg(
-        asset_name="robot",
-        resampling_time_range=(10.0, 10.0),
-        rel_standing_envs=0.0,
-        rel_heading_envs=1.0,
-        heading_command=False,
-        debug_vis=False,
-        ranges=mdp.UniformVelocityCommandCfg.Ranges(
-            lin_vel_x=(0.4, 0.8), # 前進 0.4〜0.8 m/s
-            lin_vel_y=(0.0, 0.0),
-            ang_vel_z=(0.0, 0.0),
-            heading=(0.0, 0.0),
-        ),
-    )
-
-
-@configclass
 class Go2SingleLegRewardsCfg(RewardsCfg):
-    """一本足けんけん 報酬設計"""
+    """一本足爆発ジャンプ 報酬設計"""
 
-    # 1. ★ 特大滞空時間報酬 (地面を蹴ってピョンと跳ねる動作) ★
-    single_leg_hop_air_time = RewTerm(
-        func=custom_rewards.single_leg_hop_air_time_reward,
-        weight=15.0,
-        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="RR_foot"), "threshold": 0.04},
-    )
-
-    # 2. ★ 前進キック推力報酬 (床を蹴って前・上へ打ち出す) ★
-    forward_thrust = RewTerm(
-        func=custom_rewards.single_leg_forward_thrust_reward,
-        weight=8.0,
+    # 1. ★ 超特大爆発的鉛直打ち上げ報酬 (Vz > +0.3 m/s) ★
+    explosive_launch = RewTerm(
+        func=custom_rewards.explosive_vertical_launch_reward,
+        weight=35.0,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="RR_foot")},
     )
 
-    # 3. ★ 前進速度追従報酬 (前へ跳ね進む) ★
-    track_lin_vel_xy_exp = RewTerm(
-        func=custom_rewards.track_forward_vel_exp,
-        weight=10.0,
-        params={"command_name": "base_velocity", "std": 0.5},
+    # 2. ★ 完全空中クリアランス報酬 (足先が宙に浮いている状態) ★
+    flight_clearance = RewTerm(
+        func=custom_rewards.flight_air_clearance_reward,
+        weight=30.0,
+        params={"asset_cfg": SceneEntityCfg("robot", body_names="RR_foot"), "min_clearance": 0.05},
+    )
+
+    # 3. ★ スライディング・接地引きずり禁止ペナルティ (接地している毎ステップ減点！) ★
+    ground_stagnation = RewTerm(
+        func=custom_rewards.ground_stagnation_penalty,
+        weight=-10.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="RR_foot")},
     )
 
     # 4. 生存報酬
-    alive = RewTerm(func=custom_rewards.single_leg_alive_reward, weight=4.0)
+    alive = RewTerm(func=custom_rewards.single_leg_alive_reward, weight=3.0)
 
     # 5. 他3脚の完全高空保持報酬
     disabled_3legs_high = RewTerm(
@@ -97,12 +78,13 @@ class Go2SingleLegRewardsCfg(RewardsCfg):
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=["Head_.*", "FL_.*", "FR_.*", "RL_.*", "base"])},
     )
 
-    # 7. アクション滑らかさ
+    # 7. アクション変化率ペナルティ
     action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
 
     # 8. トルク正則化
     dof_torques_l2 = RewTerm(func=custom_rewards.dof_torques_l2, weight=-0.0001)
 
+    track_lin_vel_xy_exp = None
     track_ang_vel_z_exp = None
     lin_vel_z_l2 = None
     ang_vel_xy_l2 = None
@@ -113,9 +95,8 @@ class Go2SingleLegRewardsCfg(RewardsCfg):
 
 @configclass
 class Go2SingleLegEnvCfg(LocomotionVelocityRoughEnvCfg):
-    """Go2 真の一本足けんけん学習環境"""
+    """Go2 真の一本足爆発ジャンプ学習環境"""
 
-    commands: Go2SingleLegCommandsCfg = Go2SingleLegCommandsCfg()
     rewards: Go2SingleLegRewardsCfg = Go2SingleLegRewardsCfg()
 
     def __post_init__(self):
@@ -161,9 +142,9 @@ class Go2SingleLegEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.scene.terrain.terrain_generator.sub_terrains["boxes"].grid_height_range = (0.005, 0.01)
             self.scene.terrain.terrain_generator.sub_terrains["random_rough"].noise_range = (0.005, 0.01)
 
-        # ★ アクション制御: 支持脚(RR)の3関節、けんけん跳躍のための十分な可動幅(scale=0.25)
+        # ★ アクション制御: 最大キック力を出せるフルレンジ(scale=0.35)
         self.actions.joint_pos.joint_names = ["RR_hip_joint", "RR_thigh_joint", "RR_calf_joint"]
-        self.actions.joint_pos.scale = 0.25
+        self.actions.joint_pos.scale = 0.35
 
         # ----------------------------------------------------
         # 厳格な終了条件 (Terminations)
@@ -182,7 +163,7 @@ class Go2SingleLegEnvCfg(LocomotionVelocityRoughEnvCfg):
         # 2. ★ 姿勢が崩れたら即座に終了 ★
         self.terminations.orientation_deviation = DoneTerm(
             func=custom_rewards.hopping_orientation_deviation_termination,
-            params={"max_angle_error": 0.65, "target_roll": math.radians(25.3), "target_pitch": math.radians(-20.0)},
+            params={"max_angle_error": 0.70, "target_roll": math.radians(25.3), "target_pitch": math.radians(-20.0)},
         )
 
         # 3. ★ 胴体高さが 0.16m 未満で終了 ★

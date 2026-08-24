@@ -1,5 +1,5 @@
 # Copyright (c) 2024-2026. All rights reserved.
-# Unitree Go2 真の一本足けんけん (Strict Single-Leg Forward Hopping) 報酬＆終了条件設計
+# Unitree Go2 真の一本足爆発ジャンプ (True Single-Leg Explosive Jump & Flight) 報酬＆終了判定
 
 from __future__ import annotations
 
@@ -16,56 +16,55 @@ if TYPE_CHECKING:
 
 
 # ----------------------------------------------------------------------
-# 1. けんけん報酬関数 (Forward Hopping Rewards)
+# 1. 爆発的ジャンプ報酬関数 (Explosive Jump Rewards)
 # ----------------------------------------------------------------------
 
-def single_leg_hop_air_time_reward(
-    env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, threshold: float = 0.04
-) -> torch.Tensor:
-    """
-    【けんけん滞空時間報酬】
-    支持脚(RR_foot)が床を蹴って体全体が空中に舞い上がり(Air time)、着地した瞬間に滞空時間を評価
-    """
-    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-    first_contact = contact_sensor.compute_first_contact(env.step_dt)[:, sensor_cfg.body_ids]
-    last_air_time = contact_sensor.data.last_air_time[:, sensor_cfg.body_ids]
-    
-    air_reward = torch.sum(torch.clamp(last_air_time - threshold, min=0.0, max=0.25) * first_contact.float(), dim=1)
-    return air_reward * 15.0
-
-
-def single_leg_forward_thrust_reward(
+def explosive_vertical_launch_reward(
     env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg
 ) -> torch.Tensor:
     """
-    【けんけん前進キック推力報酬】
-    接地中に支持脚(RR)で床を後ろ・下向きに蹴り、前進速度(Vx > 0)と上向き速度(Vz > 0)を生み出す動作を評価
+    【爆発的鉛直打ち上げ報酬】
+    膝を一気に伸展させて、体全体を上空(Vz > +0.4 m/s)へ打ち出す爆発的キック動作に特大ボーナス
     """
     robot: RigidObject = env.scene["robot"]
-    root_vx = robot.data.root_lin_vel_b[:, 0] # 機体前方速度
     root_vz = robot.data.root_lin_vel_w[:, 2] # 鉛直上昇速度
-    calf_vel = robot.data.joint_vel[:, 11]   # 膝伸展速度
+    calf_vel = robot.data.joint_vel[:, 11]   # 膝伸展角速度
     
+    # 鉛直上昇速度が +0.3 m/s を超えた分に特大加点
+    launch_power = torch.clamp(root_vz - 0.2, min=0.0) * 10.0 + torch.clamp(calf_vel - 1.0, min=0.0) * 0.2
+    return launch_power
+
+
+def flight_air_clearance_reward(
+    env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, min_clearance: float = 0.05
+) -> torch.Tensor:
+    """
+    【完全空中クリアランス報酬】
+    支持脚(RR_foot)が床から 5cm〜20cm 以上宙に浮いて完全飛行している状態を高く評価
+    """
+    robot: RigidObject = env.scene[asset_cfg.name]
+    rr_foot_z = robot.data.body_pos_w[:, asset_cfg.body_ids[0], 2]
+    
+    # 足先が床から 5cm 以上離れているほど得点
+    air_clearance = torch.clamp(rr_foot_z - min_clearance, min=0.0, max=0.20)
+    return air_clearance * 20.0
+
+
+def ground_stagnation_penalty(
+    env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg
+) -> torch.Tensor:
+    """
+    【スライディング・接地引きずり禁止ペナルティ】
+    足を床につけたままにしている間、毎ステップ強力な減点を科す (スライディング逃げ道を封鎖！)
+    """
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     forces = torch.norm(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :], dim=-1)
-    is_grounded = (torch.sum(forces, dim=1) > 2.0).float()
-    
-    thrust = torch.clamp(root_vx, min=0.0) * 2.0 + torch.clamp(root_vz, min=0.0) * 1.5 + torch.clamp(calf_vel, min=0.0) * 0.1
-    return thrust * is_grounded
-
-
-def track_forward_vel_exp(
-    env: ManagerBasedRLEnv, std: float = 0.5, command_name: str = "base_velocity", asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
-) -> torch.Tensor:
-    """【前進速度追従報酬】目標の前進速度(Vx = +0.6 m/s)に向かってピョンピョン進むことを評価"""
-    robot: RigidObject = env.scene[asset_cfg.name]
-    commands = env.command_manager.get_command(command_name)
-    lin_vel_err = torch.square(commands[:, 0] - robot.data.root_lin_vel_b[:, 0])
-    return torch.exp(-lin_vel_err / (std**2))
+    is_grounded = (torch.sum(forces, dim=1) > 1.0).float()
+    return is_grounded
 
 
 def single_leg_alive_reward(env: ManagerBasedRLEnv) -> torch.Tensor:
-    """【けんけん生存報酬】一本足で跳び続けている毎ステップに報酬"""
+    """【一本足生存報酬】"""
     return torch.ones(env.num_envs, device=env.device)
 
 
@@ -82,7 +81,7 @@ def disabled_3legs_high_airborne_reward(
 def strict_illegal_contact_penalty(
     env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg
 ) -> torch.Tensor:
-    """【他パーツ接地ペナルティ】他3脚や胴体が床に触れた瞬間への厳罰"""
+    """【他パーツ接地ペナルティ】"""
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     forces = torch.norm(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :], dim=-1)
     is_contact = torch.sum((forces > 1.5).float(), dim=1)
@@ -108,11 +107,11 @@ def absolute_strict_illegal_contact_termination(
 
 def hopping_orientation_deviation_termination(
     env: ManagerBasedRLEnv,
-    max_angle_error: float = 0.65,
+    max_angle_error: float = 0.70,
     target_roll: float = math.radians(25.3),
     target_pitch: float = math.radians(-20.0),
 ) -> torch.Tensor:
-    """【姿勢崩れ終了判定】けんけん中のピッチ・ロール許容角(約37度)を超えて転倒したらリセット"""
+    """【姿勢崩れ終了判定】"""
     robot = env.scene["robot"]
     proj_g = robot.data.projected_gravity_b
     target_gx = math.sin(target_pitch)
