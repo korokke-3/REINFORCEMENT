@@ -1,5 +1,5 @@
 # Copyright (c) 2024-2026. All rights reserved.
-# Unitree Go2 一本足アクティブ・ホッピング (Active Continuous Hopping) 環境設定
+# Unitree Go2 完全一本足アクティブ・バランシング (Strict Single-Leg Active Balancing) 環境設定
 
 from __future__ import annotations
 
@@ -38,45 +38,37 @@ from . import go2_single_leg_rewards as custom_rewards
 
 @configclass
 class Go2SingleLegRewardsCfg(RewardsCfg):
-    """一本足アクティブ・ホッピング 報酬設計"""
+    """一本足アクティブ・バランシング 報酬設計"""
 
-    # 1. ★ 特大滞空時間報酬 (地面を蹴って跳ねる動作への最大インセンティブ) ★
-    single_leg_air_time = RewTerm(
-        func=custom_rewards.single_leg_air_time_reward,
-        weight=15.0,
-        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="RR_foot"), "threshold": 0.04},
-    )
+    # 1. ★ 生存報酬 (他パーツを床につけず一本足で耐える毎ステップへの最大報酬) ★
+    alive = RewTerm(func=custom_rewards.strict_alive_reward, weight=10.0)
 
-    # 2. ★ 接地キック推力報酬 (上向き速度の生成) ★
-    push_off_thrust = RewTerm(
-        func=custom_rewards.push_off_thrust_reward,
-        weight=8.0,
-        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="RR_foot")},
-    )
-
-    # 3. ★ 生存報酬 (耐え続けることへの基本報酬) ★
-    alive = RewTerm(func=custom_rewards.alive_reward, weight=3.0)
-
-    # 4. ★ 重心直下姿勢維持報酬 ★
+    # 2. ★ 重心直下アライメント維持報酬 (左右・前後の姿勢キープ) ★
     posture = RewTerm(
-        func=custom_rewards.precise_orientation_reward,
-        weight=4.0,
-        params={"target_roll": math.radians(28.5), "target_pitch": math.radians(-30.5)},
+        func=custom_rewards.strict_posture_alignment_reward,
+        weight=8.0,
+        params={"target_roll": math.radians(25.3), "target_pitch": math.radians(-25.2)},
     )
 
-    # 5. 3脚の空中保持
-    disabled_3legs_retraction = RewTerm(
-        func=custom_rewards.disabled_3legs_retraction_reward,
-        weight=2.0,
-        params={"asset_cfg": SceneEntityCfg("robot", body_names=["FL_foot", "FR_foot", "RL_foot"]), "min_height": 0.16},
+    # 3. ★ 左右横倒れ角速度ペナルティ (急激な横倒れを抑制) ★
+    roll_velocity = RewTerm(func=custom_rewards.roll_angular_velocity_penalty, weight=-0.5)
+
+    # 4. 他3脚の完全空中保持報酬
+    disabled_3legs_high = RewTerm(
+        func=custom_rewards.disabled_3legs_high_airborne_reward,
+        weight=3.0,
+        params={"asset_cfg": SceneEntityCfg("robot", body_names=["FL_foot", "FR_foot", "RL_foot"]), "min_height": 0.06},
     )
 
-    # 6. 不正接触ペナルティ
+    # 5. 不正接触ペナルティ
     illegal_contact = RewTerm(
-        func=custom_rewards.illegal_contact_penalty,
-        weight=-6.0,
-        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=["Head_.*", "FL_.*", "FR_.*", "RL_.*", "RR_thigh", "base"])},
+        func=custom_rewards.strict_illegal_contact_penalty,
+        weight=-20.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=["Head_.*", "FL_.*", "FR_.*", "RL_.*", "base"])},
     )
+
+    # 6. アクション変化率ペナルティ
+    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.02)
 
     # 7. トルク正則化
     dof_torques_l2 = RewTerm(func=custom_rewards.dof_torques_l2, weight=-0.0001)
@@ -92,7 +84,7 @@ class Go2SingleLegRewardsCfg(RewardsCfg):
 
 @configclass
 class Go2SingleLegEnvCfg(LocomotionVelocityRoughEnvCfg):
-    """Go2 一本足アクティブ・ホッピング学習環境"""
+    """Go2 完全一本足アクティブ・バランシング学習環境"""
 
     rewards: Go2SingleLegRewardsCfg = Go2SingleLegRewardsCfg()
 
@@ -102,24 +94,24 @@ class Go2SingleLegEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.robot = UNITREE_GO2_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/base"
 
-        # ★ 精密重心直下アライメント・ソフト接地スポーン (Roll=+28.5°, Pitch=-30.5°)
-        self.scene.robot.init_state.pos = (0.0, 0.0, 0.360)
-        self.scene.robot.init_state.rot = (0.2447, -0.2505, -0.0658, 0.9341)
+        # ★ 精密重心直下アライメント・他3脚完全高空保持 (Roll=+25.3°, Pitch=-25.2°)
+        self.scene.robot.init_state.pos = (0.0, 0.0, 0.330)
+        self.scene.robot.init_state.rot = (0.2201, -0.2079, -0.0480, 0.9518)
         
-        # 初期状態: 他3脚はコンパクトに折りたたみ、支持脚(RR)で構える
+        # 初期状態: 他3脚は上空へ完全に引き上げ固定、支持脚(RR)のみ接地
         self.scene.robot.init_state.joint_pos = {
             "FL_hip_joint": 0.1,
             "FR_hip_joint": -0.1,
             "RL_hip_joint": 0.2,
-            "RR_hip_joint": -0.1,
-            "FL_thigh_joint": -1.2,
-            "FR_thigh_joint": -1.2,
-            "RL_thigh_joint": 1.5,
-            "RR_thigh_joint": 0.70,
-            "FL_calf_joint": -1.0,
-            "FR_calf_joint": -1.0,
-            "RL_calf_joint": -2.5,
-            "RR_calf_joint": -2.00,
+            "RR_hip_joint": 0.05,
+            "FL_thigh_joint": -1.4,
+            "FR_thigh_joint": -1.4,
+            "RL_thigh_joint": 1.8,
+            "RR_thigh_joint": 0.42,
+            "FL_calf_joint": -0.9,
+            "FR_calf_joint": -0.9,
+            "RL_calf_joint": -2.6,
+            "RR_calf_joint": -1.50,
         }
 
         # リセット時の初期外乱ゼロ化
@@ -139,31 +131,31 @@ class Go2SingleLegEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.scene.terrain.terrain_generator.sub_terrains["boxes"].grid_height_range = (0.005, 0.01)
             self.scene.terrain.terrain_generator.sub_terrains["random_rough"].noise_range = (0.005, 0.01)
 
-        # ★ アクション制御: 支持脚3関節、アクティブホッピングのための可動幅(scale=0.20)
+        # ★ アクション制御: 支持脚(RR)の3関節（RR_hip: 左右バランス, RR_thigh, RR_calf）
         self.actions.joint_pos.joint_names = ["RR_hip_joint", "RR_thigh_joint", "RR_calf_joint"]
-        self.actions.joint_pos.scale = 0.20
+        self.actions.joint_pos.scale = 0.15
 
         # ----------------------------------------------------
-        # 終了条件 (Terminations)
+        # 厳格な終了条件 (Terminations)
         # ----------------------------------------------------
         self.terminations.base_contact = None
 
-        # 1. 右後足以外が地面に強く接触したら終了 (閾値 5.0N)
+        # 1. ★ 右後足(RR)以外が地面に 2.0N でも触れたら即座に終了！ ★
         self.terminations.illegal_parts_contact = DoneTerm(
-            func=custom_rewards.strict_illegal_contact_termination,
+            func=custom_rewards.absolute_strict_illegal_contact_termination,
             params={
-                "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["Head_.*", "FL_.*", "FR_.*", "RL_.*", "RR_thigh", "base"]),
-                "threshold": 5.0,
+                "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["Head_.*", "FL_.*", "FR_.*", "RL_.*", "base"]),
+                "threshold": 2.0,
             },
         )
 
-        # 2. 姿勢が大きく崩れたら終了 (ホッピング許容角 35度)
+        # 2. ★ 姿勢が崩れたら即座に終了 ★
         self.terminations.orientation_deviation = DoneTerm(
-            func=custom_rewards.orientation_deviation_termination,
-            params={"max_angle_error": 0.60, "target_roll": math.radians(28.5), "target_pitch": math.radians(-30.5)},
+            func=custom_rewards.strict_orientation_deviation_termination,
+            params={"max_angle_error": 0.40, "target_roll": math.radians(25.3), "target_pitch": math.radians(-25.2)},
         )
 
-        # 3. 胴体高さが 0.16m 未満で終了
+        # 3. ★ 胴体高さが 0.16m 未満で終了 ★
         self.terminations.root_height_below_minimum = DoneTerm(
             func=mdp.root_height_below_minimum,
             params={"minimum_height": 0.16},
