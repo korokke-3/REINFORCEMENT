@@ -1,0 +1,10 @@
+[2026-08-23 02:20:18] [AUTONOMOUS] === FULL AUTONOMOUS CONTINUOUS LEARNING STARTED ===
+[2026-08-23 02:20:18] [AUTONOMOUS] Cycle 1: Starting Transition-based Single-Leg Training (4096 envs, 800 iters)...
+[2026-08-23 04:06:00] [AUTONOMOUS] Cycle 1: Training finished. Generating video and trajectory...
+[2026-08-23 04:06:38] [AUTONOMOUS] Analyzing trajectory and coordinates...
+| Index | Name           | Stiffness | Damping | Armature | Static Friction | Dynamic Friction | Viscous Friction | Position Limits  | Velocity Limits | Effort Limits |
+|   0   | base_velocity | UniformVelocityCommand |
+Total XY Displacement   : 0.2880 m
+Mean Actual Velocity    : Vx=-0.1258 m/s, Vy=-0.0594 m/s
+Base Height (Z)         : Min=0.1800m, Max=0.3856m, Mean=0.2699m
+[2026-08-23 04:06:38] [AUTONOMOUS] === ALL EXPERIMENTS COMPLETED SUCCESSFULLY ===
