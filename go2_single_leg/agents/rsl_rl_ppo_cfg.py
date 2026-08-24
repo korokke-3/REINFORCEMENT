@@ -4,17 +4,17 @@ from isaaclab_rl.rsl_rl import RslRlMLPModelCfg, RslRlOnPolicyRunnerCfg, RslRlPp
 
 @configclass
 class UnitreeGo2SingleLegPPORunnerCfg(RslRlOnPolicyRunnerCfg):
-    """完全一本足アクティブ・バランシング PPO 設定"""
+    """真の一本足けんけん (Forward Hopping) PPO 設定"""
     num_steps_per_env = 24
     max_iterations = 1000
     save_interval = 100
-    experiment_name = "go2_strict_single_leg_balancing"
+    experiment_name = "go2_single_leg_forward_hopping"
 
     actor = RslRlMLPModelCfg(
         hidden_dims=[256, 128, 64],
         activation="elu",
         obs_normalization=False,
-        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=0.35),
+        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=0.6), # ダイナミックな跳躍探索
     )
     critic = RslRlMLPModelCfg(
         hidden_dims=[256, 128, 64],
