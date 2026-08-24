@@ -14,7 +14,7 @@ This repository contains reinforcement learning environments, physical dynamics 
   * `opt_balance.py`: Numerical optimizer for exact CoM (Center of Mass) vertical alignment.
   * `test_true_vertical_jump.py`: Momentum-transfer inertial assist jump test.
   * `compare_torque_limits.py`: Actuator torque limit (23.5Nm vs 45Nm vs 80Nm) comparative analysis.
-  * `verify_rl_spawn.py`: Spawn stability and zero-noise contact verification.
+  * `eval_active_hopping.py`: Evaluation script for trained active continuous hopping policy.
 
 ---
 
@@ -31,8 +31,10 @@ This repository contains reinforcement learning environments, physical dynamics 
 * **Optimal Pitch**: $-30.50^\circ$
 * **Horizontal CoM-Foot Offset**: $1.47\text{ mm}$ (Eliminates gravitational toppling torque at spawn).
 
-### 3. Active Hopping Control Principle
-* Since static standing is physically unstable on a point foot, continuous dynamic resilience is achieved via active hopping (15 Hz micro-hops) where foot placement is continuously adjusted during flight to counteract toppling moments.
+### 3. Active Hopping Policy Results (Trained on IsaacLab PPO)
+* **Airborne Ratio**: $\approx 40\%$ of evaluation time in active ballistic flight.
+* **Foot Clearance in Flight**: Up to $+13.9\text{ cm}$ ground clearance.
+* **Continuous Resilient Hopping**: AI successfully learned to push off the ground, adjust foot placement in mid-air, and absorb touchdown to counteract toppling moments.
 
 ---
 
@@ -52,5 +54,5 @@ python train.py --num_envs 4096 --max_iterations 1000
 
 ### Play / Visualize Trained Policy
 ```bash
-python play.py --task Isaac-Velocity-Rough-Unitree-Go2-SingleLeg-Play-v0 --num_envs 1
+python eval_active_hopping.py
 ```
