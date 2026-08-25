@@ -1,5 +1,5 @@
 # Copyright (c) 2024-2026. All rights reserved.
-# Unitree Go2 真の一本足爆発ジャンプ (True Single-Leg Explosive Jump & Flight) 環境設定
+# Unitree Go2 純粋足先ゴム球一本足爆発ジャンプ (Pure Toe-Foot Single-Leg Explosive Jump) 環境設定
 
 from __future__ import annotations
 
@@ -38,9 +38,9 @@ from . import go2_single_leg_rewards as custom_rewards
 
 @configclass
 class Go2SingleLegRewardsCfg(RewardsCfg):
-    """一本足爆発ジャンプ 報酬設計"""
+    """純粋足先ゴム球一本足ジャンプ 報酬設計"""
 
-    # 1. ★ 超特大爆発的鉛直打ち上げ報酬 (Vz > +0.3 m/s) ★
+    # 1. ★ 爆発的鉛直打ち上げ報酬 (Vz > +0.2 m/s) ★
     explosive_launch = RewTerm(
         func=custom_rewards.explosive_vertical_launch_reward,
         weight=35.0,
@@ -54,34 +54,41 @@ class Go2SingleLegRewardsCfg(RewardsCfg):
         params={"asset_cfg": SceneEntityCfg("robot", body_names="RR_foot"), "min_clearance": 0.05},
     )
 
-    # 3. ★ スライディング・接地引きずり禁止ペナルティ (接地している毎ステップ減点！) ★
+    # 3. ★ 膝の完全空中クリアランス報酬 (膝が床から6cm以上離れている状態) ★
+    knee_clearance = RewTerm(
+        func=custom_rewards.knee_air_clearance_reward,
+        weight=12.0,
+        params={"asset_cfg": SceneEntityCfg("robot", body_names="RR_calf"), "min_height": 0.06},
+    )
+
+    # 4. ★ スライディング・接地引きずり禁止ペナルティ ★
     ground_stagnation = RewTerm(
         func=custom_rewards.ground_stagnation_penalty,
         weight=-10.0,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="RR_foot")},
     )
 
-    # 4. 生存報酬
+    # 5. 生存報酬
     alive = RewTerm(func=custom_rewards.single_leg_alive_reward, weight=3.0)
 
-    # 5. 他3脚の完全高空保持報酬
+    # 6. 他3脚の完全高空保持報酬
     disabled_3legs_high = RewTerm(
         func=custom_rewards.disabled_3legs_high_airborne_reward,
         weight=3.0,
         params={"asset_cfg": SceneEntityCfg("robot", body_names=["FL_foot", "FR_foot", "RL_foot"]), "min_height": 0.08},
     )
 
-    # 6. 不正接触ペナルティ
+    # 7. 不正接触ペナルティ (膝・大腿含む)
     illegal_contact = RewTerm(
-        func=custom_rewards.strict_illegal_contact_penalty,
-        weight=-25.0,
-        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=["Head_.*", "FL_.*", "FR_.*", "RL_.*", "base"])},
+        func=custom_rewards.strict_toe_illegal_contact_penalty,
+        weight=-30.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=["Head_.*", "FL_.*", "FR_.*", "RL_.*", "RR_thigh", "RR_calf", "base"])},
     )
 
-    # 7. アクション変化率ペナルティ
+    # 8. アクション変化率ペナルティ
     action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
 
-    # 8. トルク正則化
+    # 9. トルク正則化
     dof_torques_l2 = RewTerm(func=custom_rewards.dof_torques_l2, weight=-0.0001)
 
     track_lin_vel_xy_exp = None
@@ -95,7 +102,7 @@ class Go2SingleLegRewardsCfg(RewardsCfg):
 
 @configclass
 class Go2SingleLegEnvCfg(LocomotionVelocityRoughEnvCfg):
-    """Go2 真の一本足爆発ジャンプ学習環境"""
+    """Go2 純粋足先ゴム球一本足爆発ジャンプ学習環境"""
 
     rewards: Go2SingleLegRewardsCfg = Go2SingleLegRewardsCfg()
 
@@ -106,10 +113,10 @@ class Go2SingleLegEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/base"
 
         # ★ 精密重心直下アライメント・他3脚完全高空保持 (Roll=+25.3°, Pitch=-20.0°)
-        self.scene.robot.init_state.pos = (0.0, 0.0, 0.330)
+        self.scene.robot.init_state.pos = (0.0, 0.0, 0.350)
         self.scene.robot.init_state.rot = (0.2201, -0.2079, -0.0480, 0.9518)
         
-        # 初期状態: 他3脚は上空へ完全に引き上げ固定、支持脚(RR)のみ接地構え
+        # 初期状態: 他3脚は上空へ完全に引き上げ固定、支持脚(RR)は足先ゴム球のみ接地し膝を高く構える
         self.scene.robot.init_state.joint_pos = {
             "FL_hip_joint": 0.1,
             "FR_hip_joint": -0.1,
@@ -118,11 +125,11 @@ class Go2SingleLegEnvCfg(LocomotionVelocityRoughEnvCfg):
             "FL_thigh_joint": -1.4,
             "FR_thigh_joint": -1.4,
             "RL_thigh_joint": 1.8,
-            "RR_thigh_joint": 0.42,
+            "RR_thigh_joint": 0.65,
             "FL_calf_joint": -0.9,
             "FR_calf_joint": -0.9,
             "RL_calf_joint": -2.6,
-            "RR_calf_joint": -1.50,
+            "RR_calf_joint": -1.90,
         }
 
         # リセット時の初期外乱ゼロ化
@@ -151,12 +158,12 @@ class Go2SingleLegEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ----------------------------------------------------
         self.terminations.base_contact = None
 
-        # 1. ★ 右後足(RR)以外が地面に 3.0N でも触れたら即座に終了！ ★
+        # 1. ★ 右後足ゴム球(RR_foot)以外の部位 (膝 RR_calf, 大腿 RR_thigh, 他3脚, 胴体) が 2.5N でも床に触れたら即座に終了！ ★
         self.terminations.illegal_parts_contact = DoneTerm(
-            func=custom_rewards.absolute_strict_illegal_contact_termination,
+            func=custom_rewards.pure_toe_illegal_contact_termination,
             params={
-                "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["Head_.*", "FL_.*", "FR_.*", "RL_.*", "base"]),
-                "threshold": 3.0,
+                "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["Head_.*", "FL_.*", "FR_.*", "RL_.*", "RR_thigh", "RR_calf", "base"]),
+                "threshold": 2.5,
             },
         )
 
