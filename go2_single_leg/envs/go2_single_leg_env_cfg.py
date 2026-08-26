@@ -9,17 +9,12 @@ import math
 from dataclasses import MISSING
 
 import isaaclab.sim as sim_utils
-from isaaclab.assets import ArticulationCfg, AssetBaseCfg
-from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.assets import ArticulationCfg
 from isaaclab.managers import ActionTermCfg as ActionTerm
 from isaaclab.managers import EventTermCfg as EventTerm
-from isaaclab.managers import ObservationGroupCfg as ObsGroup
-from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
-from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from isaaclab.utils import configclass
 
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import (
@@ -40,10 +35,9 @@ from . import go2_single_leg_rewards as custom_rewards
 
 @configclass
 class Go2SingleLegActionsCfg(ActionsCfg):
-    """Action specifications for Right-Rear Single Leg + Front Leg Tail Balancers."""
     joint_pos = mdp.JointPositionActionCfg(
         asset_name="robot",
-        joint_names=["RR_hip_joint", "RR_thigh_joint", "RR_calf_joint", "FL_thigh_joint", "FR_thigh_joint"],
+        joint_names=["RR_hip_joint", "RR_thigh_joint", "RR_calf_joint"],
         scale=0.5,
         use_default_offset=True,
     )
@@ -51,7 +45,6 @@ class Go2SingleLegActionsCfg(ActionsCfg):
 
 @configclass
 class Go2SingleLegRewardsCfg(RewardsCfg):
-    # 親の不要報酬を無効化
     track_lin_vel_xy_exp = None
     track_ang_vel_z_exp = None
     feet_air_time = None
@@ -65,52 +58,39 @@ class Go2SingleLegRewardsCfg(RewardsCfg):
     dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
     action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
 
-    # 1. 弾性リバウンド打ち上げ報酬
+    # 1. 爆発的鉛直打ち上げ報酬 (膝成功時と同等)
     explosive_launch = RewTerm(
         func=custom_rewards.pure_toe_explosive_rebound_reward,
-        weight=25.0,
+        weight=35.0,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="RR_foot")},
     )
 
     # 2. 完全滞空クリアランス報酬
     flight_clearance = RewTerm(
         func=custom_rewards.pure_toe_air_clearance_reward,
-        weight=25.0,
+        weight=30.0,
         params={"asset_cfg": SceneEntityCfg("robot", body_names="RR_foot"), "min_clearance": 0.04},
     )
 
-    # 3. Raibert Hopper 型 重心直下足先配置報酬 (着地転倒モーメントゼロ化)
-    foot_placement = RewTerm(
-        func=custom_rewards.raibert_foot_placement_reward,
-        weight=15.0,
-        params={"asset_cfg": SceneEntityCfg("robot", body_names="RR_foot")},
-    )
-
-    # 4. 空中姿勢アクティブ安定化報酬 (腕振りバランス)
-    arm_balance = RewTerm(
-        func=custom_rewards.midair_arm_balance_orientation_reward,
-        weight=10.0,
-    )
-
-    # 5. 接地引きずり・寝そべり禁止ペナルティ
+    # 3. 接地引きずり・寝そべり禁止ペナルティ
     ground_stagnation = RewTerm(
         func=custom_rewards.pure_toe_ground_stagnation_penalty,
         weight=-10.0,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="RR_foot")},
     )
 
-    # 6. 生存報酬 & 他脚高空格納報酬
-    alive = RewTerm(func=custom_rewards.pure_toe_alive_reward, weight=4.0)
+    # 4. 生存報酬 & 他脚高空格納報酬
+    alive = RewTerm(func=custom_rewards.pure_toe_alive_reward, weight=5.0)
     disabled_3legs_high = RewTerm(
         func=custom_rewards.disabled_3legs_high_airborne_reward,
-        weight=4.0,
+        weight=5.0,
         params={"asset_cfg": SceneEntityCfg("robot", body_names=["FL_foot", "FR_foot", "RL_foot"]), "min_height": 0.12},
     )
 
-    # 7. 膝・他パーツ接触の超厳格ペナルティ
+    # 5. 膝・他パーツ地面接触ペナルティ
     illegal_contact = RewTerm(
         func=custom_rewards.strict_illegal_contact_penalty,
-        weight=-30.0,
+        weight=-25.0,
         params={
             "sensor_cfg": SceneEntityCfg(
                 "contact_forces",
@@ -125,21 +105,21 @@ class Go2SingleLegTerminationsCfg(TerminationsCfg):
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     base_contact = None
     
-    # 膝・他脚・胴体が床に 3.0N でも触れたら即座に終了 (足先ゴム球のみ許容)
+    # 膝・他部位接触即死判定 (地面との衝突のみ 5.0N)
     illegal_parts_contact = DoneTerm(
-        func=custom_rewards.pure_toe_strict_illegal_contact_termination,
+        func=mdp.illegal_contact,
         params={
             "sensor_cfg": SceneEntityCfg(
                 "contact_forces",
                 body_names=[".*thigh.*", ".*calf.*", ".*base.*", "FL_foot", "FR_foot", "RL_foot"]
             ),
-            "threshold": 3.0,
+            "threshold": 5.0,
         },
     )
     
     orientation_deviation = DoneTerm(
         func=custom_rewards.pure_toe_orientation_deviation_termination,
-        params={"max_angle_error": 0.70},
+        params={"max_angle_error": 0.85},
     )
     
     root_height_below_minimum = DoneTerm(
@@ -165,42 +145,44 @@ class Go2SingleLegEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.robot = UNITREE_GO2_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/base"
 
+        # 地面接触のみをフィルタリング
+        self.scene.contact_forces.filter_prim_paths_expr = ["/World/ground.*"]
+
         self.decimation = 4
         self.episode_length_s = 5.0
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation
 
-        # ★ 足を最大伸展させた完全スポーン姿勢 (Roll=+22.0°, Pitch=-16.0°) ★
-        opt_roll = math.radians(22.0)
-        opt_pitch = math.radians(-16.0)
+        # ★ 実証済みの完全接地・手足伸ばし一本足スポーン姿勢 ★
+        opt_roll = math.radians(20.0)
+        opt_pitch = math.radians(-12.0)
         cr = math.cos(opt_roll * 0.5); sr = math.sin(opt_roll * 0.5)
         cp = math.cos(opt_pitch * 0.5); sp = math.sin(opt_pitch * 0.5)
         qw = cr * cp; qx = sr * cp; qy = cr * sp; qz = -sr * sp
 
-        self.scene.robot.init_state.pos = (0.0, 0.0, 0.415)
+        self.scene.robot.init_state.pos = (0.0, 0.0, 0.383)
         self.scene.robot.init_state.rot = (qx, qy, qz, qw)
         self.scene.robot.init_state.joint_pos = {
-            "FL_hip_joint": 0.1,
-            "FR_hip_joint": -0.1,
-            "RL_hip_joint": 0.2,
+            "FL_hip_joint": 0.35,
+            "FR_hip_joint": -0.35,
+            "RL_hip_joint": 0.35,
             "RR_hip_joint": 0.05,
-            "FL_thigh_joint": -1.4,
-            "FR_thigh_joint": -1.4,
-            "RL_thigh_joint": 1.8,
-            "RR_thigh_joint": -0.20,
-            "FL_calf_joint": -0.9,
-            "FR_calf_joint": -0.9,
-            "RL_calf_joint": -2.6,
-            "RR_calf_joint": -0.838, # 最大伸展限界
+            "FL_thigh_joint": -1.40,
+            "FR_thigh_joint": -1.40,
+            "RL_thigh_joint": 1.80,
+            "RR_thigh_joint": 0.00, # 垂直突っ張り
+            "FL_calf_joint": -0.90,
+            "FR_calf_joint": -0.90,
+            "RL_calf_joint": -2.60,
+            "RR_calf_joint": -0.850, # 最大伸展
         }
 
-        # コマンドゼロ
         self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.0)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
         self.commands.base_velocity.ranges.heading = (0.0, 0.0)
+        self.commands.base_velocity.debug_vis = False
 
-        # フラット地形
         self.scene.terrain.terrain_type = "plane"
         self.scene.terrain.terrain_generator = None
 
