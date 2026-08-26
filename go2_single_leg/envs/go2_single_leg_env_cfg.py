@@ -58,39 +58,39 @@ class Go2SingleLegRewardsCfg(RewardsCfg):
     dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
     action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
 
-    # 1. 爆発的鉛直打ち上げ報酬 (膝成功時と同等)
+    # 1. 爆発的鉛直打ち上げ報酬
     explosive_launch = RewTerm(
-        func=custom_rewards.pure_toe_explosive_rebound_reward,
-        weight=35.0,
+        func=custom_rewards.explosive_toe_launch_reward,
+        weight=45.0,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="RR_foot")},
     )
 
     # 2. 完全滞空クリアランス報酬
     flight_clearance = RewTerm(
-        func=custom_rewards.pure_toe_air_clearance_reward,
-        weight=30.0,
+        func=custom_rewards.pure_toe_high_flight_reward,
+        weight=35.0,
         params={"asset_cfg": SceneEntityCfg("robot", body_names="RR_foot"), "min_clearance": 0.04},
     )
 
     # 3. 接地引きずり・寝そべり禁止ペナルティ
     ground_stagnation = RewTerm(
-        func=custom_rewards.pure_toe_ground_stagnation_penalty,
-        weight=-10.0,
+        func=custom_rewards.ground_stagnation_penalty,
+        weight=-15.0,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="RR_foot")},
     )
 
     # 4. 生存報酬 & 他脚高空格納報酬
-    alive = RewTerm(func=custom_rewards.pure_toe_alive_reward, weight=5.0)
+    alive = RewTerm(func=custom_rewards.pure_toe_alive_reward, weight=6.0)
     disabled_3legs_high = RewTerm(
-        func=custom_rewards.disabled_3legs_high_airborne_reward,
-        weight=5.0,
+        func=custom_rewards.disabled_3legs_high_reward,
+        weight=8.0,
         params={"asset_cfg": SceneEntityCfg("robot", body_names=["FL_foot", "FR_foot", "RL_foot"]), "min_height": 0.12},
     )
 
-    # 5. 膝・他パーツ地面接触ペナルティ
+    # 5. 膝・他パーツ地面接触への巨大ペナルティ (膝接触完全禁止)
     illegal_contact = RewTerm(
-        func=custom_rewards.strict_illegal_contact_penalty,
-        weight=-25.0,
+        func=custom_rewards.heavy_illegal_contact_penalty,
+        weight=-40.0,
         params={
             "sensor_cfg": SceneEntityCfg(
                 "contact_forces",
@@ -104,27 +104,16 @@ class Go2SingleLegRewardsCfg(RewardsCfg):
 class Go2SingleLegTerminationsCfg(TerminationsCfg):
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     base_contact = None
-    
-    # 膝・他部位接触即死判定 (地面との衝突のみ 5.0N)
-    illegal_parts_contact = DoneTerm(
-        func=mdp.illegal_contact,
-        params={
-            "sensor_cfg": SceneEntityCfg(
-                "contact_forces",
-                body_names=[".*thigh.*", ".*calf.*", ".*base.*", "FL_foot", "FR_foot", "RL_foot"]
-            ),
-            "threshold": 5.0,
-        },
-    )
+    illegal_parts_contact = None
     
     orientation_deviation = DoneTerm(
-        func=custom_rewards.pure_toe_orientation_deviation_termination,
-        params={"max_angle_error": 0.85},
+        func=custom_rewards.pure_toe_catastrophic_fall_termination,
+        params={"max_angle_error": 1.10},
     )
     
     root_height_below_minimum = DoneTerm(
         func=mdp.root_height_below_minimum,
-        params={"minimum_height": 0.12},
+        params={"minimum_height": 0.10},
     )
 
 
@@ -153,14 +142,14 @@ class Go2SingleLegEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation
 
-        # ★ 実証済みの完全接地・手足伸ばし一本足スポーン姿勢 ★
-        opt_roll = math.radians(20.0)
-        opt_pitch = math.radians(-12.0)
+        # ★ 幾何学的に膝が地上+17.4cmの高空に浮き、足先ゴム球のみ接地する真のスポーン姿勢 ★
+        opt_roll = math.radians(18.0)
+        opt_pitch = math.radians(-10.0)
         cr = math.cos(opt_roll * 0.5); sr = math.sin(opt_roll * 0.5)
         cp = math.cos(opt_pitch * 0.5); sp = math.sin(opt_pitch * 0.5)
         qw = cr * cp; qx = sr * cp; qy = cr * sp; qz = -sr * sp
 
-        self.scene.robot.init_state.pos = (0.0, 0.0, 0.383)
+        self.scene.robot.init_state.pos = (0.0, 0.0, 0.406)
         self.scene.robot.init_state.rot = (qx, qy, qz, qw)
         self.scene.robot.init_state.joint_pos = {
             "FL_hip_joint": 0.35,
@@ -170,11 +159,11 @@ class Go2SingleLegEnvCfg(LocomotionVelocityRoughEnvCfg):
             "FL_thigh_joint": -1.40,
             "FR_thigh_joint": -1.40,
             "RL_thigh_joint": 1.80,
-            "RR_thigh_joint": 0.00, # 垂直突っ張り
+            "RR_thigh_joint": 0.90,   # 大腿下向き
             "FL_calf_joint": -0.90,
             "FR_calf_joint": -0.90,
             "RL_calf_joint": -2.60,
-            "RR_calf_joint": -0.850, # 最大伸展
+            "RR_calf_joint": -1.400,  # 膝地上+17.4cm高空保持！
         }
 
         self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.0)
