@@ -21,17 +21,23 @@ wheels/
 .installed.cfg
 *.egg
 
-# IsaacLab
+# IsaacLab Core
 IsaacLab/
 
-# Large Checkpoints (optional, keep code light)
-*.pt
+# Local Experimental Sandbox & Temporary Proofs (Kept locally only)
+.local_experiments/
 
-# Virtual Environments
+# Training Logs, Intermediate Weights & Tensorboard Events
+*/logs/
+assets/eval_output/
+
+# Checkpoints: Ignore general .pt files, but TRACK curated benchmark models in models/
+*.pt
+!models/*.pt
+
+# Virtual Environments & IDE
 .venv/
 venv/
 ENV/
-
-# IDE
 .vscode/
 .idea/
